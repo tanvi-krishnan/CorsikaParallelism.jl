@@ -1,0 +1,24 @@
+name = "CorsikaParallelism"
+uuid = "12345678-1234-1234-1234-123456789abc"
+version = "0.1.0"
+authors = ["Tanvi Krishnan <tkrishnan@g.harvard.edu>"]
+
+[deps]
+Arrow = "69666777-d1a9-59fb-9406-91d4454c9d45"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+Parquet2 = "98572fba-bba0-415d-956f-fa77e587d26d"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
+
+[compat]
+Arrow = "2.8.1"
+DataFrames = "1.8.2"
+Distributed = "1.11.0"
+Parquet2 = "0.2.33"
+Statistics = "1.11.1"
+StatsBase = "0.34.10"
+Unitful = "1.28.0"
+YAML = "0.4.16"
