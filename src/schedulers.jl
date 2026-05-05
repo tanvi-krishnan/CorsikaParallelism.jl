@@ -157,7 +157,7 @@ function schedule_secondaries(
 
     # Log distribution
     batch_sizes = [nrow(batch) for batch in result]
-    total_energy = [sum(skipmissing(batch.energy)) for batch in result]
+    total_energy = [nrow(batch) > 0 ? sum(skipmissing(batch.energy)) : 0.0 for batch in result]
     @info "Distribution: $batch_sizes particles, $(round.(total_energy; digits=1)) GeV per worker"
 
     return result
