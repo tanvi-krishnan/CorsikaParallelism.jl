@@ -7,18 +7,17 @@ Runs CORSIKA8 with first-interaction stopping, reads secondaries, and distribute
 
 function uses_geometry_interface(config::Dict)
     geometry_keys = (
-        "xpos", "ypos", "zpos",
-        "xdir", "ydir", "zdir",
-        "x-intercept", "y-intercept", "z-intercept",
+        "inj-x", "inj-y", "inj-z",
+        "dir-x", "dir-y", "dir-z",
     )
     return any(haskey(config, key) for key in geometry_keys)
 end
 
 function observation_plane_basis(config::Dict)
-    if haskey(config, "xdir") || haskey(config, "ydir") || haskey(config, "zdir")
-        nx = Float64(get(config, "xdir", 0.0))
-        ny = Float64(get(config, "ydir", 0.0))
-        nz = Float64(get(config, "zdir", 1.0))
+    if haskey(config, "dir-x") || haskey(config, "dir-y") || haskey(config, "dir-z")
+        nx = Float64(get(config, "dir-x", 0.0))
+        ny = Float64(get(config, "dir-y", 0.0))
+        nz = Float64(get(config, "dir-z", 1.0))
     else
         nx, ny, nz = 0.0, 0.0, 1.0
     end
@@ -103,9 +102,13 @@ function run_corsika_with_stopping(
     corsika_binary::String,
     config::Dict,
     output_dir::String;
-    generation::Int=0
+    generation::Int=0,
+    stop_after_first_interaction::Bool=false
 )
     config = Dict{String,Any}(config)
+    if stop_after_first_interaction
+        config["stop_after_first_interaction"] = true
+    end
     # Validate inputs
     !isfile(corsika_binary) && error("CORSIKA binary not found: $corsika_binary")
     !isdir(output_dir) && mkpath(output_dir)
@@ -118,19 +121,10 @@ function run_corsika_with_stopping(
     push!(cmd_args, "-E", string(config["energy"]))
     push!(cmd_args, "-N", string(config["nevent"]))
 
-    if haskey(config, "inj-x")
-        # Direct injection: use new --inj-x/y/z and --dir-x/y/z flags
-        for key in ("inj-x", "inj-y", "inj-z", "dir-x", "dir-y", "dir-z")
-            haskey(config, key) && push!(cmd_args, "--$key", string(config[key]))
-        end
-        # Still need zenith/azimuth as defaults (binary requires them even if overridden)
-        push!(cmd_args, "-z", string(get(config, "zenith", 45.0)))
-        push!(cmd_args, "-a", string(get(config, "azimuth", 0.0)))
-    elseif uses_geometry_interface(config)
+    if uses_geometry_interface(config)
         for key in (
-            "xpos", "ypos", "zpos",
-            "xdir", "ydir", "zdir",
-            "x-intercept", "y-intercept", "z-intercept",
+            "inj-x", "inj-y", "inj-z",
+            "dir-x", "dir-y", "dir-z",
         )
             haskey(config, key) && push!(cmd_args, "--$key", string(config[key]))
         end
@@ -142,6 +136,9 @@ function run_corsika_with_stopping(
     # Output filename (CORSIKA requires --filename, not --output dir)
     base_name = haskey(config, "output_tag") ? string(config["output_tag"]) : "shower_gen$(generation)_e$(config["energy"])"
     output_file = joinpath(output_dir, "$(base_name).parquet")
+    if ispath(output_file)
+        output_file = joinpath(output_dir, "$(base_name)_$(time_ns()).parquet")
+    end
     push!(cmd_args, "--filename", output_file)
 
     # Generation control
@@ -188,16 +185,13 @@ function run_corsika_with_stopping(
     @info "Running CORSIKA8 with first-interaction stopping" generation
     @info "Command: $corsika_binary $(join(cmd_args, " "))"
 
-    # Remove stale output directory so CLI11's NonexistentPath check passes on retry
-    isdir(output_file) && rm(output_file, recursive=true, force=true)
-
-    # Run CORSIKA in its own working directory to avoid fort.XX file conflicts
-    corsika_work_dir = mktempdir()
-    try
-        run(Cmd(Cmd([corsika_binary; cmd_args]); dir=corsika_work_dir))
-    finally
-        rm(corsika_work_dir, recursive=true, force=true)
+    # Run CORSIKA
+    julia_lib = "/n/home09/tkrishnan/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/lib/julia"
+    ENV["LD_LIBRARY_PATH"] = julia_lib
+    if !haskey(ENV, "FLUPRO")
+        ENV["FLUPRO"] = "/n/holylfs05/LABS/arguelles_delgado_lab/Lab/common_software/source/fluka"
     end
+    run(Cmd([corsika_binary; cmd_args]))
 
     # CORSIKA outputs a directory structure
     !isdir(output_file) && error("CORSIKA output directory not found: $output_file")
@@ -216,7 +210,7 @@ For generation >= 2: reads observation-level particles.
 # Returns
 - DataFrame with columns: energy, x, y, z, pdg_id, (other relevant fields)
 """
-function read_secondary_particles(output_dir::String; generation::Int=0)
+function read_secondary_particles(output_dir::String; generation::Int=0, read_interactions::Bool=false)
     parquet_file = if generation == 0
         joinpath(output_dir, "interactions", "interactions.parquet")
     else
@@ -264,7 +258,7 @@ function derive_subshower_seed(base_seed, shower_id::Int, idx::Int, pdg::Int)
     return Int(mod(z, UInt64(2_147_483_646)) + 1)
 end
 
-function _secondary_task_from_row(row, global_idx::Int)
+function _secondary_task_from_row(row)
     return (
         pdg = Int(row.pdg),
         energy = Float64(row.energy),
@@ -275,7 +269,6 @@ function _secondary_task_from_row(row, global_idx::Int)
         y = Float64(row.y),
         z = Float64(row.z),
         shower = Int(getproperty(row, :shower)),
-        global_idx = global_idx,
     )
 end
 
@@ -301,7 +294,7 @@ function _worksteal_worker_loop(task_queue::RemoteChannel, corsika_binary::Strin
             shower=[task.shower],
         )
 
-        output = run_secondary_batch(particle, corsika_binary, config; worker_offset=task.global_idx)
+        output = run_secondary_batch(particle, corsika_binary, config)
         if !isempty(output)
             if !have_combined
                 combined = DataFrame(output, copycols=true)
@@ -329,7 +322,7 @@ function run_secondaries_workstealing(
     length(avail) < np && error("Requested $np workers but only $(length(avail)) Distributed workers are available")
     worker_pids = avail[1:np]
 
-    tasks = [_secondary_task_from_row(row, idx) for (idx, row) in enumerate(eachrow(secondaries))]
+    tasks = [_secondary_task_from_row(row) for row in eachrow(secondaries)]
     queue = RemoteChannel(() -> Channel{NamedTuple}(length(tasks) + np))
     for t in tasks
         put!(queue, t)
@@ -338,7 +331,7 @@ function run_secondaries_workstealing(
         put!(queue, (stop=true,))
     end
 
-    futures = [@spawnat worker_pids[i] _worksteal_worker_loop(queue, corsika_binary, config) for i in 1:np]
+    futures = [@spawnat pid _worksteal_worker_loop(queue, corsika_binary, config) for pid in worker_pids]
     return map(fetch, futures)
 end
 
@@ -388,7 +381,7 @@ function distribute_and_run_secondaries(
     worker_pids = workers()[1:length(worker_batches)]
     for (i, batch) in enumerate(worker_batches)
         isempty(batch) && continue
-        future = @spawnat worker_pids[i] run_secondary_batch(batch, corsika_binary, config; worker_offset=i-1)
+        future = @spawnat worker_pids[i] run_secondary_batch(batch, corsika_binary, config)
         push!(futures, future)
     end
 
@@ -417,20 +410,17 @@ Run CORSIKA for a batch of secondary particles (called on worker process).
 function run_secondary_batch(
     particles::DataFrame,
     corsika_binary::String,
-    config::Dict;
-    worker_offset::Int=0
+    config::Dict
 )
     config = Dict{String,Any}(config)
-    base_output_dir = get(config, "batch_output_dir", nothing)
-    local batch_dir, should_cleanup
-    if base_output_dir !== nothing
-        run_id = get(config, "run_id", string(time_ns()) * "_" * string(getpid()))
-        batch_dir = joinpath(string(base_output_dir), run_id, "batch_w$(worker_offset)")
-        mkpath(batch_dir)
-        should_cleanup = false
+    # Use persistent output dir from config if available, else temp dir
+    persistent_dir = haskey(config, "batch_output_dir") && haskey(config, "run_id")
+    batch_dir = if persistent_dir
+        p = joinpath(string(config["batch_output_dir"]), string(config["run_id"]), string(myid()))
+        mkpath(p)
+        p
     else
-        batch_dir = mktempdir()
-        should_cleanup = true
+        mktempdir()
     end
 
     try
@@ -451,12 +441,12 @@ function run_secondary_batch(
                 continue
             end
 
-            # Inject at exact interaction point with secondary direction.
-            # x,y = rootCS horizontal (m); z = height above obs level (m).
-            # px,py,pz in GeV in rootCS axes; normalize for direction.
+            # Create batch-specific config
             secondary_config = Dict{String,Any}(config)
             secondary_config["pdg"] = Int(row.pdg)
             secondary_config["energy"] = energy
+            # Positions from interactions.parquet are already in rootCS meters.
+            # inj-z is height above observation level (obs-level=0 by default).
             secondary_config["inj-x"] = Float64(row.x)
             secondary_config["inj-y"] = Float64(row.y)
             secondary_config["inj-z"] = Float64(row.z)
@@ -501,10 +491,9 @@ function run_secondary_batch(
     catch err
         rethrow(err)
     finally
-        if should_cleanup
+        # Only clean up if we used a temp dir
+        if !persistent_dir
             rm(batch_dir, recursive=true, force=true)
-        else
-            @info "Sub-shower outputs saved" batch_dir
         end
     end
 end

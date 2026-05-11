@@ -5,6 +5,7 @@ authors = ["Tanvi Krishnan <tkrishnan@g.harvard.edu>"]
 
 [deps]
 Arrow = "69666777-d1a9-59fb-9406-91d4454c9d45"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 Parquet2 = "98572fba-bba0-415d-956f-fa77e587d26d"
@@ -15,6 +16,7 @@ YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [compat]
 Arrow = "2.8.1"
+CSV = "0.10.16"
 DataFrames = "1.8.2"
 Distributed = "1.11.0"
 Parquet2 = "0.2.33"
