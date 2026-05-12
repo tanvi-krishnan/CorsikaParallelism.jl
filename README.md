@@ -33,9 +33,4 @@
                                                                                                                                                                                                                                                                                                                     
   Results summary                                                                                                                                                     
                                                                                    
-  Tested at 10 TeV, 100 TeV, and 1 PeV primary proton energies on the Harvard
-  FASRC cluster. Workstealing with W=8 workers gives the best performance. Strong
-  scaling holds up to ~8 workers and plateaus beyond that due to process-launch                                                                                       
-  and I/O overhead. Final-state particle counts, total energy, and energy                                                                                             
-  distributions agree with the serial CORSIKA 8 baseline within statistical                                                                                           
-  uncertainties (KS statistic ~5–10%). 
+  Tested at 10 TeV, 100 TeV, and 1 PeV primary proton energies on the Harvard FASRC cluster. Workstealing with W=8 workers gives the best performance. Strong scaling holds up to ~8 workers and plateaus beyond that due to process-launch and I/O overhead. Final-state particle counts, total energy, and energy distributions agree with the serial CORSIKA 8 baseline within statistical uncertainties (KS statistic ~5–10%). 
